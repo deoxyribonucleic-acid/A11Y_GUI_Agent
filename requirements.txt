@@ -1,0 +1,7 @@
+dotenv
+macapptree
+openai
+pillow
+pyautogui
+pyobjc
+subprocess

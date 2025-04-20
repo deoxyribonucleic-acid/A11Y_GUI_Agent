@@ -55,13 +55,12 @@ class LLMTool:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ]
-
-        try:
-            response = self.client.chat.completions.create(
+        response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
             )
-            content = response.choices[0].message.content
+        content = response.choices[0].message.content
+        try:
             self.json_string = self._extract_json(content)
         except json.JSONDecodeError:
             print("Failed to decode JSON from response.")

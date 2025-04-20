@@ -100,7 +100,7 @@ class AgentOrchestrator:
                     print(f"Quitting application: {action.get('app_name')}")
                 print(f"Executing action: {action}")
                 dispatch_action(action)
-                time.sleep(1)
+                time.sleep(2)
 
     def judge(self):
         """
@@ -205,6 +205,7 @@ class AgentOrchestrator:
                 if status == "replan":
                     print(f"Replanning due to advice: {result.get('advice')}")
                     break
+                time.sleep(2)
 
             if status == "replan":
                 if replan_counter < 3:

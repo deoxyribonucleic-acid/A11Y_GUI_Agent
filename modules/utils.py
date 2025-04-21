@@ -121,6 +121,10 @@ def get_window_position_by_name(app_name):
             pid = app.processIdentifier()
             break
 
+    if pid is None:
+        print(f"❌ Application '{app_name}' not found.")
+        return 0, 0, screen_width, screen_height
+
     app = AXUIElementCreateApplication(pid)
     windows_ptr = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, None)[1]
     window = windows_ptr[0]
@@ -281,10 +285,99 @@ def print_accessibility_tree(node, indent=0):
     for child in children:
         print_accessibility_tree(child, indent + 1)
 
+
+import uuid
+
+def compress_ui_tree(node, compression_level=1):
+    """
+    Compress macOS UI Tree JSON.
+    Parameters:
+        node: dict, the node structure obtained from macapptree
+        compression_level: int, controls the compression level (0-3)
+    Returns:
+        list of dicts, compressed node information
+    """
+    def parse_frame(frame_str):
+        try:
+            # "{{x, y}, {w, h}}" → [x1, y1, x2, y2]
+            parts = frame_str.replace("{", "").replace("}", "").replace(" ", "").split(",")
+            x, y, w, h = map(float, parts)
+            return [int(x), int(y), int(x + w), int(y + h)]
+        except:
+            print(f"Error parsing frame: {frame_str}")
+            return None
+
+    def is_interactive(role):
+        interactive_types = {"button", "checkbox", "radiobutton", "menuitem", "textfield", "link", "popupbutton"}
+        return role.lower() in interactive_types
+
+    def compress_node(node):
+        role = node.get("role", "").replace("AX", "").lower()
+        label = node.get("label", "")
+        enabled = node.get("enabled", True)
+        visible = node.get("visible", True)
+        bbox = node.get("visible_bbox", [])
+        # bbox = parse_frame(frame) if frame else None
+
+        keep = True
+        if bbox is None:
+            keep = False
+        if compression_level >= 2:
+            if not visible or not enabled or not is_interactive(role):
+                keep = False
+
+        if not keep:
+            return []
+
+        compressed = {
+            "id": str(uuid.uuid4())[:8],
+            "type": role,
+        }
+
+        if compression_level == 0:
+            compressed.update({
+                "label": label,
+                "enabled": enabled,
+                "visible": visible,
+                "bbox": bbox,
+                "raw": node
+            })
+        elif compression_level == 1:
+            compressed.update({
+                "label": label,
+                "enabled": enabled,
+                "visible": visible,
+                "bbox": bbox
+            })
+        elif compression_level == 2:
+            compressed.update({
+                "label": label,
+                "bbox": bbox
+            })
+        elif compression_level >= 3:
+            compressed.update({
+                "label": label[:30],  # Truncate label to prevent excessive length
+                "bbox": bbox
+            })
+
+        return [compressed]
+
+    result = []
+
+    def traverse(node):
+        result.extend(compress_node(node))
+        for child in node.get("children", []):
+            traverse(child)
+
+    traverse(node)
+    return result
+
 if __name__ == "__main__":
     # Example usage
     app_name = "Safari"
     tree, croped_img, segmented_img = get_tree_screenshot(app_name)
-    croped_img.show()
-    segmented_img.show()
-    print_accessibility_tree(tree)
+    # croped_img.show()
+    # segmented_img.show()
+    print(json.dumps(tree, indent=2))
+    compressed_tree = compress_ui_tree(tree, compression_level=4)
+    print(json.dumps(compressed_tree, indent=2))

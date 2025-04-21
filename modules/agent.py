@@ -52,28 +52,32 @@ class AgentOrchestrator:
         """
         print("===" * 20)
         print(f"Stage 2/3: Executing task: {current_task}")
+        print("Current App:", self.Memory.short_term_memory["app_name"])
 
         self.Memory.update_short_term_memory("current_task", current_task)
 
         tree, seg_im = None, None
-        if self.Memory.short_term_memory["app_name"]:
+        tree_compressed = None
+        if self.Memory.short_term_memory["app_name"] is not None:
             try:
-                focus_app_by_name(self.Memory.short_term_memory["app_name"])
-                app_name, _, _ = get_frontmost_app_info()
-                tree, seg_im = get_tree_screenshot(app_name)
+                app_name = self.Memory.short_term_memory["app_name"]
+                focus_app_by_name(app_name)
+                # app_name, _, _ = get_frontmost_app_info()
+                tree, _, seg_im = get_tree_screenshot(app_name)
+                tree_compressed = compress_ui_tree(tree, compression_level=4)
             except Exception as e:
                 print(f"Error focusing app: {e}, trying to get screenshot without focusing.")
 
         if seg_im is None:
             seg_im = get_full_screenshot()
 
-        self.Memory.update_short_term_memory("ui_tree", tree)
+        self.Memory.update_short_term_memory("ui_tree", tree_compressed)
 
         mouse_global_pos = get_mouse_position()
         mouse_win_pos = global_to_window(mouse_global_pos, get_window_position_by_name(self.Memory.short_term_memory["app_name"]))
         self.Memory.update_short_term_memory("mouse_position", mouse_win_pos)
 
-        previous_tool_calls = self.Memory.long_term_memory["Attempts"][-1].tool_calls if self.Memory.long_term_memory["Attempts"] else ""
+        previous_attempts = self.Memory.long_term_memory["Attempts"][-1] if self.Memory.long_term_memory["Attempts"] else ""
 
         user_propmpt = user_prompt_action.format(
             task_prompt=self.Memory.permanent_memory["task_prompt"],
@@ -82,7 +86,7 @@ class AgentOrchestrator:
             app_name=self.Memory.short_term_memory["app_name"],
             mouse_position=self.Memory.short_term_memory["mouse_position"],
             current_task=self.Memory.short_term_memory["current_task"],
-            previous_tool_calls=previous_tool_calls,
+            previous_tool_calls=previous_attempts,
         )
 
         seg_im_base64 = encode_image_base64(seg_im)
@@ -94,7 +98,7 @@ class AgentOrchestrator:
             for action in result:
                 if action.get("action_type") == "OpenApplicationAction":
                     self.Memory.update_short_term_memory("app_name", action.get("app_name"))
-                    print(f"Opening application: {action.get('app_name')}")
+                    print(f"Opened application: {action.get('app_name')}")
                 elif action.get("action_type") == "QuitApplicationAction":
                     self.Memory.update_short_term_memory("app_name", None)
                     print(f"Quitting application: {action.get('app_name')}")

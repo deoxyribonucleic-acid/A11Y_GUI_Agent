@@ -223,14 +223,14 @@ def get_tree_screenshot(app_name, max_depth=None):
     window_element = get_main_window(windows, max_depth)
 
     extracted = extract_window(
-            window_element, app_bundle, a11y_tmp_file, False, False, max_depth
+            window_element, app_bundle, a11y_tmp_file.name, False, False, max_depth
         )
     
     if not extracted:
         raise "Couldn't extract accessibility"
     
     if screenshot_tmp_file:
-        output_croped, _ = screenshot_window_to_file(app.localizedName(), window_element.name, screenshot_tmp_file)
+        output_croped, _ = screenshot_window_to_file(app.localizedName(), window_element.name, screenshot_tmp_file.name)
         output_segmented = segment_window_components(window_element, output_croped)
         result = json.dumps({
             "croped_screenshot_path": output_croped,
@@ -265,3 +265,26 @@ def get_full_screenshot():
     screenshot = pyautogui.screenshot()
     screenshot = screenshot.convert("RGB").resize(size=(screenshot.width // 2, screenshot.height // 2))
     return screenshot
+
+def print_accessibility_tree(node, indent=0):
+    """Recursively print macOS accessibility tree structure"""
+    prefix = "  " * indent
+    role = node.get("role", "Unknown")
+    name = node.get("name") or node.get("value") or ""
+    description = node.get("description") or node.get("role_description") or ""
+    bbox = node.get("bbox", [])
+    
+    print(f"{prefix}- [{role}] '{name}' ({description}) BBox: {bbox}")
+
+    # Print child nodes
+    children = node.get("children", [])
+    for child in children:
+        print_accessibility_tree(child, indent + 1)
+
+if __name__ == "__main__":
+    # Example usage
+    app_name = "Safari"
+    tree, croped_img, segmented_img = get_tree_screenshot(app_name)
+    croped_img.show()
+    segmented_img.show()
+    print_accessibility_tree(tree)

@@ -1,2 +1,4 @@
 .env
 __pycache__/
+processed_dataset/
+.DS_Store

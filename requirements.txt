@@ -4,4 +4,3 @@ openai
 pillow
 pyautogui
 pyobjc
-subprocess

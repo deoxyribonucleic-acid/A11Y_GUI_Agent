@@ -2,3 +2,5 @@
 __pycache__/
 processed_dataset/
 .DS_Store
+log_results/
+good_results/

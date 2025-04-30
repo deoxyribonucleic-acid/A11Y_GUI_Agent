@@ -18,7 +18,7 @@ class LLMTool:
         load_dotenv()
         api_key = os.getenv("OPENAI_API_KEY")
         org_id = os.getenv("OPENAI_ORG_ID")
-        model = os.getenv("Model_NAME", "gpt-4o-mini")
+        model = os.getenv("MODEL_NAME", "gpt-4o")
         self.client = openai.OpenAI(
             api_key=api_key,
             organization=org_id,

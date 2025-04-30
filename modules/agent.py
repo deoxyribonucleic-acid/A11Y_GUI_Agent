@@ -1,3 +1,4 @@
+import os
 from PIL import Image
 
 from .prompts import *
@@ -10,13 +11,33 @@ class AgentOrchestrator:
     Orchestrates the planning, execution, and evaluation of tasks using an LLM and memory modules.
     """
 
-    def __init__(self):
+    def __init__(self, save_result=False, save_path=None):
         self.llm = LLMTool()
         self.Memory = AgentMemory()
+        self.save_result = save_result
+        self.save_path = save_path
+
+        if self.save_result:
+            if not os.path.exists(self.save_path):
+                os.makedirs(self.save_path)
+            print(f"Results will be saved to: {self.save_path}")
+            # Create subfolders for responses and screenshots if they do not exist
+            response_path = os.path.join(self.save_path, "responses")
+            screenshots_path = os.path.join(self.save_path, "screenshots")
+            if not os.path.exists(response_path):
+                os.makedirs(response_path)
+            if not os.path.exists(screenshots_path):
+                os.makedirs(screenshots_path)
+
+            # Save LLM responses and screenshots
+            self.response_path = response_path
+            self.screenshots_path = screenshots_path
+            print(f"Subfolders created: {response_path}, {screenshots_path}")
 
     def plan(self, task_prompt):
         """
         Plans the task based on the given task prompt and updates the memory with planned tasks.
+        Returns the planned result for saving.
         """
         print("===" * 20)
         print(f"Stage 1/3: Planning task: {task_prompt}")
@@ -25,14 +46,10 @@ class AgentOrchestrator:
         self.Memory.update_permanent_memory("os_version", check_OS_version())
         self.Memory.update_short_term_memory("app_name", None)
 
-        mouse_global_pos = get_mouse_position()
-        self.Memory.update_short_term_memory("mouse_position", mouse_global_pos)
-
         user_propmpt = user_prompt_info.format(
             task_prompt=task_prompt,
             os_version=self.Memory.permanent_memory["os_version"],
             app_name=self.Memory.short_term_memory["app_name"],
-            mouse_position=self.Memory.short_term_memory["mouse_position"],
         )
 
         response = self.llm.run(sys_prompt_init, user_propmpt)
@@ -46,9 +63,12 @@ class AgentOrchestrator:
 
         print(f"Planned tasks: {planned_tasks}")
 
+        return result
+
     def execute(self, current_task):
         """
         Executes the current task by interacting with the UI and dispatching actions.
+        Returns the LLM response, screenshot, and UI tree for saving.
         """
         print("===" * 20)
         print(f"Stage 2/3: Executing task: {current_task}")
@@ -62,7 +82,6 @@ class AgentOrchestrator:
             try:
                 app_name = self.Memory.short_term_memory["app_name"]
                 focus_app_by_name(app_name)
-                # app_name, _, _ = get_frontmost_app_info()
                 tree, _, seg_im = get_tree_screenshot(app_name)
                 tree_compressed = compress_ui_tree(tree, compression_level=4)
             except Exception as e:
@@ -74,14 +93,16 @@ class AgentOrchestrator:
         self.Memory.update_short_term_memory("ui_tree", tree_compressed)
 
         mouse_global_pos = get_mouse_position()
-        mouse_win_pos = global_to_window(mouse_global_pos, get_window_position_by_name(self.Memory.short_term_memory["app_name"]))
+        window_bbox = get_window_position_by_name(self.Memory.short_term_memory["app_name"])
+        mouse_win_pos = global_to_window(mouse_global_pos, window_bbox)
         self.Memory.update_short_term_memory("mouse_position", mouse_win_pos)
 
-        previous_attempts = self.Memory.long_term_memory["Attempts"][-1] if self.Memory.long_term_memory["Attempts"] else ""
+        previous_attempts = self.Memory.long_term_memory["Attempts"] if self.Memory.long_term_memory["Attempts"] else ""
 
         user_propmpt = user_prompt_action.format(
             task_prompt=self.Memory.permanent_memory["task_prompt"],
             ui_tree=self.Memory.short_term_memory["ui_tree"],
+            window_size={"width": window_bbox[2], "height": window_bbox[3]},
             os_version=self.Memory.permanent_memory["os_version"],
             app_name=self.Memory.short_term_memory["app_name"],
             mouse_position=self.Memory.short_term_memory["mouse_position"],
@@ -102,13 +123,25 @@ class AgentOrchestrator:
                 elif action.get("action_type") == "QuitApplicationAction":
                     self.Memory.update_short_term_memory("app_name", None)
                     print(f"Quitting application: {action.get('app_name')}")
+                elif action.get("action_type") == "MouseAction":
+                    pos = action.get("mouse_position")
+                    if pos is not None:
+                        x = pos.get("width")
+                        y = pos.get("height")
+                        windo_bbox = get_window_position_by_name(self.Memory.short_term_memory["app_name"])
+                        x_glob, y_glob = window_to_global(x, y, windo_bbox)
+                        print(f"Mapping mouse position: {x}, {y} for app {self.Memory.short_term_memory['app_name']} at {windo_bbox} to {x_glob}, {y_glob}")
+                        action["mouse_position"] = {"width": x_glob, "height": y_glob}  # update mouse position to global
                 print(f"Executing action: {action}")
                 dispatch_action(action)
                 time.sleep(2)
 
+        return result, seg_im, tree_compressed
+
     def judge(self):
         """
         Judges the outcome of the current task and provides feedback or advice for replanning or retrying.
+        Returns the screenshot and parsed LLM response for saving.
         """
         print("===" * 20)
         print(f"Stage 3/3: Judging task: {self.Memory.short_term_memory['current_task']}")
@@ -120,20 +153,23 @@ class AgentOrchestrator:
         im = get_full_screenshot()
 
         mouse_global_pos = get_mouse_position()
-        mouse_win_pos = global_to_window(mouse_global_pos, get_window_position_by_name(self.Memory.short_term_memory["app_name"]))
+        window_bbox = get_window_position_by_name(self.Memory.short_term_memory["app_name"])
+        mouse_win_pos = global_to_window(mouse_global_pos, window_bbox)
         self.Memory.update_short_term_memory("mouse_position", mouse_win_pos)
 
-        previous_tool_calls = self.Memory.long_term_memory["Attempts"][-1].tool_calls if self.Memory.long_term_memory["Attempts"] else ""
+        previous_tool_calls = self.Memory.long_term_memory["Attempts"] if self.Memory.long_term_memory["Attempts"] else ""
 
         user_propmpt = user_prompt_judge.format(
             task_prompt=self.Memory.permanent_memory["task_prompt"],
             ui_tree=self.Memory.short_term_memory["ui_tree"],
             os_version=self.Memory.permanent_memory["os_version"],
+            window_size={"width": window_bbox[2], "height": window_bbox[3]},
             app_name=self.Memory.short_term_memory["app_name"],
             mouse_position=self.Memory.short_term_memory["mouse_position"],
             current_task=self.Memory.short_term_memory["current_task"],
             previous_tool_calls=previous_tool_calls,
             current_tool_calls=self.Memory.short_term_memory["current_tool_calls"],
+            sub_task_list=self.Memory.permanent_memory["planned_tasks"],
         )
 
         seg_im_base64 = encode_image_base64(im)
@@ -149,7 +185,7 @@ class AgentOrchestrator:
                 self.Memory.drop_long_term_memory()
             elif result.get("status") == "replan":
                 self.Memory.drop_long_term_memory()
-            return result
+            return im, result
 
     def replan(self, advice):
         """
@@ -175,45 +211,87 @@ class AgentOrchestrator:
         result = LLMTool.postprocess_by_prompt(response)
 
         planned_tasks = [item.get("element") for item in result]
-        self.Memory.update_permanent_memory("planned_task", planned_tasks)
+        self.Memory.update_permanent_memory("planned_tasks", planned_tasks)
         self.Memory.update_short_term_memory("current_task", planned_tasks[0])
 
         print(f"Planned tasks: {planned_tasks}")
 
+        return result
+
     def run(self, task_prompt, replan_counter=0, advice=""):
         """
         Runs the entire task lifecycle: planning, execution, and judging. Handles replanning if necessary.
+        Saves results to appropriate folders with unique filenames to avoid overwriting.
         """
         print(f"Running task: {task_prompt}, Replan attempt: {replan_counter}, Advice: {advice}")
 
         if replan_counter == 0:
-            self.plan(task_prompt)
+            plan_result = self.plan(task_prompt)
+            if self.save_result:
+                # Save plan results
+                plan_filename = os.path.join(self.response_path, "plan_result.json")
+                with open(plan_filename, "w") as f:
+                    json.dump(plan_result, f)
+                print(f"Plan result saved to: {plan_filename}")
         else:
-            self.replan(advice)
+            replan_result = self.replan(advice)
+            if self.save_result:
+            # Save replan results
+                replan_filename = os.path.join(self.response_path, f"replan_attempt_{replan_counter}.json")
+                with open(replan_filename, "w") as f:
+                    json.dump(replan_result, f)
+                print(f"Replan result saved to: {replan_filename}")
 
         status = None
-        for subtask in self.Memory.permanent_memory["planned_tasks"]:
+        for idx, subtask in enumerate(self.Memory.permanent_memory["planned_tasks"]):
             retry_count = 0
             while True:
-                self.execute(subtask)
-                result = self.judge()
-                status = result.get("status")
+                result, screenshot, ui_tree = self.execute(subtask)
+                judge_im, judge_result = self.judge()
+                status = judge_result.get("status")
                 retry_count += 1
-                print(f"{subtask} # Attempt {retry_count} - Status: {status}, Advice: {result.get('advice')}")
+                print(f"{subtask} # Attempt {retry_count} - Status: {status}, Advice: {judge_result.get('advice')}")
+
+                # Save results to appropriate folders
+                if self.save_result:
+                    # Save execution results
+                    exec_filename = os.path.join(self.response_path, f"subtask_{idx}_attempt_{retry_count}_execute.json")
+                    with open(exec_filename, "w") as f:
+                        json.dump(result, f)
+                    print(f"Execution result saved to: {exec_filename}")
+
+                    # Save execution screenshot
+                    screenshot_filename = os.path.join(self.screenshots_path, f"subtask_{idx}_attempt_{retry_count}_execute.png")
+                    screenshot.save(screenshot_filename)
+                    print(f"Execution screenshot saved to: {screenshot_filename}")
+
+                    # Save judge results
+                    judge_filename = os.path.join(self.response_path, f"subtask_{idx}_attempt_{retry_count}_judge.json")
+                    with open(judge_filename, "w") as f:
+                        json.dump(judge_result, f)
+                    print(f"Judge result saved to: {judge_filename}")
+
+                    # Save judge screenshot
+                    judge_screenshot_filename = os.path.join(self.screenshots_path, f"subtask_{idx}_attempt_{retry_count}_judge.png")
+                    if judge_im:
+                        judge_im.save(judge_screenshot_filename)
+                    print(f"Judge screenshot saved to: {judge_screenshot_filename}")
+
                 if retry_count > 3:
                     print("Retry limit reached. Forcing replan.")
+                    status = "replan"
                     break
                 if status == "success":
                     print(f"Subtask '{subtask}' completed successfully.")
                     break
                 if status == "replan":
-                    print(f"Replanning due to advice: {result.get('advice')}")
+                    print(f"Replanning due to advice: {judge_result.get('advice')}")
                     break
                 time.sleep(2)
 
             if status == "replan":
                 if replan_counter < 3:
-                    self.run(task_prompt, replan_counter + 1, result.get("advice"))
+                    self.run(task_prompt, replan_counter + 1, judge_result.get("advice"))
                 else:
                     print("Replan limit reached. Failed.")
                     break

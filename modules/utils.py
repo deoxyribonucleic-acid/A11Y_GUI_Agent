@@ -63,32 +63,36 @@ def get_mouse_position():
     x, y = pyautogui.position()
     return (x, y)
 
-def window_to_global(x, y, width, height):
+def window_to_global(x, y, window_bbox):
     """
     Convert window coordinates to global screen coordinates.
     :param x: Window X-coordinate.
     :param y: Window Y-coordinate.
-    :param width: Window width.
-    :param height: Window height.
+    :param window_bbox: Tuple (window_x, window_y, window_width, window_height).
     :return: A tuple (global_x, global_y).
     """
     screen_width, screen_height = pyautogui.size()
-    global_x = x + (screen_width - width) // 2
-    global_y = y + (screen_height - height) // 2
+    window_x, window_y, window_width, window_height = window_bbox
+    global_x = x + window_x
+    global_y = y + window_y
     return (global_x, global_y)
 
-def global_to_window(global_pos, window_pos):
+def global_to_window(global_pos, window_bbox):
     """
     Convert global screen coordinates to window coordinates.
     :param global_pos: Tuple (global_x, global_y).
-    :param window_pos: Tuple (window_x, window_y).
+    :param window_bbox: Tuple (window_x, window_y, window_width, window_height).
     :return: A tuple (window_x, window_y).
     """
     screen_width, screen_height = pyautogui.size()
-    global_x, global_y = global_pos[0], global_pos[1]
-    window_x, window_y = window_pos[0], window_pos[1]
-    window_x = global_x - (screen_width - window_x) // 2
-    window_y = global_y - (screen_height - window_y) // 2
+    global_x, global_y = global_pos
+    window_x, window_y, window_width, window_height = window_bbox
+    window_x = global_x - window_x
+    window_y = global_y - window_y
+    if window_x < 0:
+        window_x = 0
+    if window_y < 0:
+        window_y = 0
     return (window_x, window_y)
 
 def encode_image_base64(image: Image) -> str:
@@ -117,12 +121,13 @@ def get_window_position_by_name(app_name):
     workspace = NSWorkspace.sharedWorkspace()
     pid = None
     for app in workspace.runningApplications():
-        if app.localizedName() == app_name:
+        if app.localizedName().lower() == app_name.lower():
             pid = app.processIdentifier()
             break
 
     if pid is None:
         print(f"❌ Application '{app_name}' not found.")
+        screen_width, screen_height = pyautogui.size()
         return 0, 0, screen_width, screen_height
 
     app = AXUIElementCreateApplication(pid)
@@ -137,6 +142,7 @@ def get_window_position_by_name(app_name):
 
     _, (x, y) = pos
     _, (width, height) = size
+    print(f"App '{app_name}' position: ({x}, {y}), size: ({width}, {height})")
     return int(x), int(y), int(width), int(height)
 
 def get_frontmost_app_info():
@@ -297,15 +303,16 @@ def compress_ui_tree(node, compression_level=1):
     Returns:
         list of dicts, compressed node information
     """
-    def parse_frame(frame_str):
-        try:
-            # "{{x, y}, {w, h}}" → [x1, y1, x2, y2]
-            parts = frame_str.replace("{", "").replace("}", "").replace(" ", "").split(",")
-            x, y, w, h = map(float, parts)
-            return [int(x), int(y), int(x + w), int(y + h)]
-        except:
-            print(f"Error parsing frame: {frame_str}")
-            return None
+
+    def is_center_out_of_screen(center):
+        """
+        Check if the center of an element is out of the current screen bounds.
+        :param center: A tuple (x, y) representing the center of the element.
+        :return: True if the center is out of screen bounds, False otherwise.
+        """
+        screen_width, screen_height = pyautogui.size()
+        x, y = center
+        return x < 0 or y < 0 or x > screen_width or y > screen_height
 
     def is_interactive(role):
         interactive_types = {"button", "checkbox", "radiobutton", "menuitem", "textfield", "link", "popupbutton"}
@@ -326,6 +333,16 @@ def compress_ui_tree(node, compression_level=1):
             if not visible or not enabled or not is_interactive(role):
                 keep = False
 
+        if bbox is not None:
+            # use center point
+            center = [
+                (bbox[0] + bbox[2]) // 2,
+                (bbox[1] + bbox[3]) // 2
+            ]
+
+            if is_center_out_of_screen(center):
+                keep = False
+
         if not keep:
             return []
 
@@ -340,6 +357,7 @@ def compress_ui_tree(node, compression_level=1):
                 "enabled": enabled,
                 "visible": visible,
                 "bbox": bbox,
+                "center": center,
                 "raw": node
             })
         elif compression_level == 1:
@@ -347,17 +365,24 @@ def compress_ui_tree(node, compression_level=1):
                 "label": label,
                 "enabled": enabled,
                 "visible": visible,
-                "bbox": bbox
+                "bbox": bbox,
+                "center": center
             })
         elif compression_level == 2:
             compressed.update({
                 "label": label,
-                "bbox": bbox
+                "bbox": bbox,
+                "center": center,
             })
         elif compression_level >= 3:
             compressed.update({
+                "label": label,
+                "center": center,
+            })
+        elif compression_level >= 4:
+            compressed.update({
                 "label": label[:30],  # Truncate label to prevent excessive length
-                "bbox": bbox
+                "center": center,
             })
 
         return [compressed]
@@ -379,5 +404,5 @@ if __name__ == "__main__":
     # croped_img.show()
     # segmented_img.show()
     print(json.dumps(tree, indent=2))
-    compressed_tree = compress_ui_tree(tree, compression_level=4)
+    compressed_tree = compress_ui_tree(tree, compression_level=2)
     print(json.dumps(compressed_tree, indent=2))

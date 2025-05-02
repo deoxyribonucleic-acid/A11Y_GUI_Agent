@@ -1,9 +1,9 @@
-# ♿️ Accessibility is All You Need
+# ♿️ Accessibility is All You Need for Percise Mouse Clicks in GUI Agents
 ### *Utilizing Accessibility Labels as Natural Screen Captioners in GUI Agents*
-
+[Ruijie Chen](https://deoxyribonucleic-acid.github.io/), [Haotian Hao](https://github.com/910834430), [Yuhan Huang](https://github.com/Rhiannahyh), [Shufeng Yin](https://github.com/chen-xin-y), [Tianyi Zhou](https://github.com/titanwings)
 ## Introduction
+![Proposed Framework](figures/pipeline.png)
 This project leverages the Accessibility API to produce a precise segmentation and captioning map that facilitates UI understanding with significantly lower computational overhead compared to traditional OCR, object detection, or image segmentation models.
-
 ## Limitations
 - **Platform Restriction:** Currently supports only 🍎 macOS. 
 - **Scope Limitation:** UI extraction is confined to the foreground application with window focus. Efforts are ongoing to address this limitation on macOS.
@@ -43,6 +43,9 @@ This project leverages the Accessibility API to produce a precise segmentation a
    ```bash
    python test_agent.py
    ```
+
+## Highlighted Result
+![Highlighted Result](figures/ours_task1_combined_demonstration.png)
 
 ## References
 - [ScreenAgent](https://github.com/niuzaisheng/ScreenAgent) for system prompt design and overall system architecture.

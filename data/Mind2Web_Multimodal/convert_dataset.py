@@ -122,7 +122,7 @@ def save_example_file(session_id, file_name, data, image, image_file_name):
         os.mkdir(os.path.join(SAVE_PATH, session_id))
         os.mkdir(os.path.join(SAVE_PATH, session_id, "images"))
 
-    with open(os.path.join(SAVE_PATH, session_id, file_name), "w") as f:
+    with open(os.path.join(SAVE_PATH, session_id, file_name), "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
     image.save(os.path.join(SAVE_PATH, session_id, "images", image_file_name))
@@ -278,7 +278,7 @@ def process_candidates(pos_candidates, neg_candidates, sort_method='bbox', seed=
     else:
         return filter_visible_candidates(all_candidates, min_area=-1, clickable_only=filter_clickable)
 
-def filter_visible_candidates(candidates, min_area=100.0, clickable_only=False):
+def filter_visible_candidates(candidates, min_area=25.0, clickable_only=False):
     """
     根据面积/可点击性过滤UI候选元素列表
     :param candidates: 输入候选列表（含bounding_box_rect字段）
@@ -292,7 +292,7 @@ def filter_visible_candidates(candidates, min_area=100.0, clickable_only=False):
     for cand in candidates:
         attrs = cand.get("attributes", {})
         rect_str = attrs.get("bounding_box_rect", "")
-        is_clickable = attrs.get("is_clickable", "false").lower() == "true"
+        is_clickable = attrs.get("is_clickable", "true").lower() == "true" # only remove is_clickable=False
 
         # 过滤非点击元素（如开启）
         if clickable_only and not is_clickable:
@@ -514,6 +514,7 @@ def process_one_task(action):
         pos_candidates = parsed
         if len(pos_candidates) > 0 and "attributes" in pos_candidates[0]:
             bbox_str = pos_candidates[0]["attributes"].get("bounding_box_rect", None)
+            backend_id = pos_candidates[0]["attributes"].get("backend_node_id", "-1")
             if bbox_str:
                 bbox_parts = [float(x.strip()) for x in bbox_str.split(",")]
                 bounding_box = {
@@ -578,6 +579,7 @@ def process_one_task(action):
     action_screens.append({
             "action_uid": action_uid,
             "orig_before_action_screenshot": orig_before_action_screenshot,
+            "backend_node_id": backend_id,
             "uu": uu,
             "before_action_screenshot": before_cropped,
             "annotated_before_action_screenshot": anno_cropped,
@@ -621,7 +623,9 @@ def process_one_task(action):
                 "operation_value": convert_string(action_screens[action_index]["operation_value"]),
                 "center_width": action_screens[action_index]["center_width"],
                 "center_height": action_screens[action_index]["center_height"],
-                "is_last_action_in_subsession": is_last_action_in_subsession
+                "is_last_action_in_subsession": is_last_action_in_subsession,
+                "bounding_box": action_screens[action_index]["LURD_bbox"],
+                "backend_node_id": action_screens[action_index]["backend_node_id"],
             }
 
             saved_json_name = f"{annotation_id}_sub_session{sub_session_index}_action{action_index}.json"
@@ -638,8 +642,52 @@ def process_one_task(action):
             save_image_for_check(annotation_id, screenshot_unanno, saved_image_name, action_answer_info)
             save_annotated_image(annotation_id, screenshot_anno, saved_image_name)
 
-            with open(os.path.join(SAVE_PATH, annotation_id, annotation_id + "_candidates.json"), "w") as f:
-                json.dump(all_candidates, f, indent=4, ensure_ascii=False)
+            compressed_candidates = []
+
+            for i in all_candidates:
+                title = i["attributes"].get("title", None)
+                aria_label = i["attributes"].get("aria_label", None) 
+                if aria_label is not None:
+                    label = aria_label
+                elif title is not None:
+                    label = title
+                else:
+                    label = ""
+
+                role = i["attributes"].get("role", "")
+                class_name = i["attributes"].get("class", "")
+
+                if role == "" and class_name != "":
+                    role = class_name
+
+                bbox = i["attributes"].get("bounding_box_rect", None)
+                x1, y1, w, h = bbox.split(",")
+                x1, y1, w, h = float(x1), float(y1), float(w), float(h)
+                x2, y2 = x1 + w, y1 + h
+
+                x1, y1, x2, y2 = (
+                    int(x1 * ratio_before),
+                    int(y1 * ratio_before),
+                    int(x2 * ratio_before),
+                    int(y2 * ratio_before),
+                )
+                L, U, R, D = x1, y1, x2, y2
+                uu = action_screens[action_index]["uu"]
+                L2, U2, R2, D2 = L, U - uu, R, D - uu
+                
+                center_x = (L2 + R2) // 2
+                center_y = (U2 + D2) // 2
+                
+                candidate = {"bbox": (L2, U2, R2, D2),
+                             "center": (center_x, center_y),
+                            "id": i["backend_node_id"],
+                            "label": label,
+                            "role": role,
+                              }
+                compressed_candidates.append(candidate)
+
+            with open(os.path.join(SAVE_PATH, annotation_id, annotation_id + "_candidates.json"), "w", encoding="utf-8") as f:
+                json.dump(compressed_candidates, f, indent=4, ensure_ascii=False)
 
 
 if DEBUG:

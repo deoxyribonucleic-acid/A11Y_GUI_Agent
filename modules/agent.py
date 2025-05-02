@@ -178,7 +178,7 @@ class AgentOrchestrator:
         result = LLMTool.postprocess_by_prompt(response)
 
         if isinstance(result, dict):
-            print(f"Judging result: {result}, advice: {result.get('advice')}")
+            print(f"Judging result: {result.get('status')}, advice: {result.get('advice')}")
             if result.get("status") == "retry":
                 self.Memory.update_long_term_memory(self.Memory.short_term_memory["current_task"], self.Memory.short_term_memory["current_tool_calls"], result, im)
             elif result.get("status") == "success":
